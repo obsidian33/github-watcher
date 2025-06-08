@@ -1,49 +1,55 @@
 package githubapi_test
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
+	"os"
 	"testing"
 
-	githubapi "github.com/obsidian33/github-watcher/internal"
+	approvals "github.com/approvals/go-approval-tests"
+	. "github.com/obsidian33/github-watcher/internal"
+	reporters "github.com/obsidian33/go-approval-reporters"
 )
-
-const baseURL = "https://api.github.com"
 
 func TestGitHubAPI(t *testing.T) {
 
 	t.Run("Get latest release", func(t *testing.T) {
-		// https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#get-the-latest-release
-		url := fmt.Sprintf("%s/repos/Azure/kubelogin/releases/latest", baseURL)
-		req, err := http.NewRequest(http.MethodGet, url, nil)
+		got, err := GetLatestReleaseJSON(&http.Client{}, "Azure/kubelogin")
 		if err != nil {
-			t.Fatalf("Failed to make request %v", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
-
-		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("x-GitHub-Api-Version", "2022-11-28")
-
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("Failed to send request %v", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("Expected status code 200 OK, got %d", resp.StatusCode)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-
-		var g githubapi.Release
-		if err := json.Unmarshal(body, &g); err != nil {
-			t.Fatalf("Failed to unmarshal response body: %v", err)
-		}
-
-		fmt.Printf("Latest release version: %s\nPublished at: %s\n", g.Version, g.PublishedAt.String())
+		approvals.VerifyJSONBytes(t, got)
 	})
 
+	t.Run("Get repository content", func(t *testing.T) {
+		got, err := GetRepositoryContentJSON(
+			&http.Client{},
+			"obsidian33/chocolatey-packages",
+			"azure-kubelogin/azure-kubelogin.nuspec",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		approvals.VerifyJSONBytes(t, got)
+	})
+
+	t.Run("Workflow dispatch", func(t *testing.T) {
+		err := WorkflowDispatch(
+			&http.Client{},
+			os.Getenv("GITHUB_TOKEN"),
+			"obsidian33/chocolatey-packages",
+			"chocolatey-pacakge-dispatch.yaml",
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+}
+
+func TestMain(m *testing.M) {
+	r := approvals.UseReporter(reporters.NewDeltaDiffReporter())
+	defer r.Close()
+
+	approvals.UseFolder("test-approvals")
+	os.Exit(m.Run())
 }

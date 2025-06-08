@@ -56,3 +56,12 @@ func (s Semver) GreaterThan(other Semver) bool {
 	}
 	return s.Patch > other.Patch
 }
+
+func (s *Semver) UnmarshalText(text []byte) error {
+	v, err := ParseSemver(string(text))
+	if err != nil {
+		return err
+	}
+	*s = v
+	return nil
+}

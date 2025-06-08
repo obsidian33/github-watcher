@@ -1,38 +1,14 @@
 package githubapi_test
 
 import (
-	"fmt"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	. "github.com/obsidian33/github-watcher/internal"
 )
-
-func TestIsNewRelease(t *testing.T) {
-	cases := []struct {
-		latest, stored string
-		want           bool
-	}{
-		{"v2.0.0", "v1.0.0", true},
-		{"v2.0.0", "v2.0.0", false},
-		{"v1.0.0", "v2.0.0", false},
-		{"v2.1.0", "v2.0.0", true},
-		{"2.1.34", "v2.1.0", true},
-		{"v2.1.4", "v2.1.5", false},
-	}
-
-	for _, c := range cases {
-		t.Run(fmt.Sprint(c), func(t *testing.T) {
-			got := IsNewRelease(c.latest, c.stored)
-			if got != c.want {
-				t.Errorf("latest %q, stored %q is new release %t", c.latest, c.stored, got)
-			}
-		})
-	}
-}
 
 type fakeRoundTripper struct {
 	respBody string
@@ -48,18 +24,67 @@ func (f *fakeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func TestGetLatestRelease(t *testing.T) {
-	json := `{"tag_name": "v2.1.34", "published_at": "2023-10-01T12:00:00Z"}`
-	client := &http.Client{
-		Transport: &fakeRoundTripper{respBody: json, status: http.StatusOK},
-	}
+	t.Run("happy path", func(t *testing.T) {
+		json := `{"tag_name": "v2.1.34"}`
+		client := &http.Client{
+			Transport: &fakeRoundTripper{respBody: json, status: http.StatusOK},
+		}
 
-	got, err := GetLatestRelease(client, "Azure/kubelogin")
-	if err != nil {
-		t.Fatalf("unecpected error: %v", err)
-	}
+		got, err := GetLatestRelease(client, "Azure/kubelogin")
+		if err != nil {
+			t.Fatalf("unecpected error: %v", err)
+		}
 
-	want := Release{Version: "v2.1.34", PublishedAt: time.Date(2023, 10, 1, 12, 0, 0, 0, time.UTC)}
-	if got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
+		want := Release{
+			Version: Semver{
+				Major: 2,
+				Minor: 1,
+				Patch: 34,
+			},
+		}
+
+		if got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+}
+
+func TestGetNuspecVersion(t *testing.T) {
+	t.Run("happy path", func(t *testing.T) {
+		xml := `<?xml version="1.0" encoding="utf-8"?>
+		<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+			<metadata>
+				<version>0.2.8</version>
+			</metadata>
+		</package>`
+		content := base64.StdEncoding.EncodeToString([]byte(xml))
+		json := `{"content": "` + content + `"}`
+		client := &http.Client{
+			Transport: &fakeRoundTripper{respBody: json, status: http.StatusOK},
+		}
+
+		got, err := GetNuspecVersion(client, "owner/repo", "path/to/a.nuspec")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := Semver{Major: 0, Minor: 2, Patch: 8}
+
+		if got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+}
+
+func TestWorkflowDispatch(t *testing.T) {
+	t.Run("happy path", func(t *testing.T) {
+		client := &http.Client{
+			Transport: &fakeRoundTripper{status: http.StatusNoContent},
+		}
+
+		err := WorkflowDispatch(client, "TOKEN", "owner/repo", "workflow_id")
+
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
 }
